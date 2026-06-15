@@ -6,7 +6,24 @@
 // 患者が日本語以外の言語で話しても、Whisperが言語を自動検出し、
 // AIが内容を「日本語」に変換して問診メモを生成する。
 // 追加質問は患者が検出された言語で表示される（メモ自体は常に日本語）。
+//
+// 【配布用バックエンド（任意）】
+// API_PROXY_BASE に Cloudflare Worker 等のURLを設定すると、APIキーを
+// クライアントに置かずに本番動作する（URLを他の人に配布できる）。
+// 空の場合は「端末ごとにAPIキー設定 or モック動作」になる。
 // ============================================
+
+// ====== ここを設定すると配布可能になる ======
+// 例: 'https://ai-prediagnosis-proxy.xxxxx.workers.dev'
+const API_PROXY_BASE = '';
+// Worker側で APP_TOKEN を設定した場合のみ、同じ合言葉を入れる（任意）
+const API_APP_TOKEN = '';
+// ===========================================
+
+// バックエンド経由 or 端末のAPIキーが使える場合は本番動作（それ以外はモック）
+function isLiveMode() {
+  return !!API_PROXY_BASE || !!state.apiKey;
+}
 
 // ---------- 状態管理 ----------
 const state = {
@@ -267,9 +284,13 @@ function clearApiKey() {
 function updateModeBadge() {
   const badge = document.getElementById('mode-badge');
   const modeText = document.getElementById('current-mode');
-  if (state.apiKey) {
+  if (API_PROXY_BASE) {
+    // バックエンド経由（キーはサーバー側／配布可能）
+    if (badge) { badge.textContent = '本番API（サーバー）'; badge.className = 'mode-badge api'; }
+    if (modeText) modeText.textContent = '🟢 本番API（サーバー経由）';
+  } else if (state.apiKey) {
     if (badge) { badge.textContent = '本番API'; badge.className = 'mode-badge api'; }
-    if (modeText) modeText.textContent = '🟢 OpenAI API';
+    if (modeText) modeText.textContent = '🟢 OpenAI API（端末キー）';
   } else {
     if (badge) { badge.textContent = 'モック'; badge.className = 'mode-badge mock'; }
     if (modeText) modeText.textContent = '🟡 モック動作';
@@ -670,7 +691,7 @@ function buildQRPayload(memo) {
 // language は固定せず、Whisperに言語を自動検出させる。
 // 初回の発話で検出した言語を state.patientLang に保存する。
 async function transcribeAudio(audioBlob, item) {
-  if (!state.apiKey) {
+  if (!isLiveMode()) {
     await sleep(1500);
     if (state.recordingHandler === handleInitialAudio || !state._mockPattern) {
       // 初回：モックパターンを1つ選ぶ
@@ -692,9 +713,10 @@ async function transcribeAudio(audioBlob, item) {
   // language は指定しない（Whisperが話者の言語を自動検出する）
   formData.append('response_format', 'verbose_json'); // 検出言語を取得するため
 
-  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+  // バックエンド経由なら /api/transcribe、未設定なら端末のキーで直接OpenAIへ
+  const response = await fetch(apiEndpoint('audio/transcriptions'), {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${state.apiKey}` },
+    headers: apiHeaders(),   // FormData なので Content-Type はブラウザに任せる
     body: formData,
   });
   if (!response.ok) {
@@ -719,7 +741,7 @@ function setDetectedLang(whisperLangName) {
 async function translateToJapanese(text) {
   if (!text || isJapaneseLang()) return text;
 
-  if (!state.apiKey) {
+  if (!isLiveMode()) {
     await sleep(800);
     // モック：パターンに用意した日本語訳を返す
     return (state._mockPattern && state._mockPattern.jaTranscript) || text;
@@ -746,7 +768,7 @@ async function localizeForPatient(jaText) {
   if (state._i18nCache[jaText]) return state._i18nCache[jaText];
 
   let translated;
-  if (!state.apiKey) {
+  if (!isLiveMode()) {
     // モック：辞書から引く（無ければ原文のまま）
     const dict = MOCK_I18N[state.patientLang] || {};
     translated = dict[jaText] || jaText;
@@ -766,6 +788,26 @@ async function localizeForPatient(jaText) {
   return translated;
 }
 
+// ---------- API呼び出し先・ヘッダーの共通化（プロキシ or 直接） ----------
+// API_PROXY_BASE があればバックエンド経由（キーはサーバー側）。無ければ端末のキーで直接。
+function apiEndpoint(path) {
+  if (API_PROXY_BASE) {
+    const map = { 'audio/transcriptions': '/api/transcribe', 'chat/completions': '/api/chat' };
+    return API_PROXY_BASE.replace(/\/+$/, '') + (map[path] || ('/' + path));
+  }
+  return 'https://api.openai.com/v1/' + path;
+}
+
+function apiHeaders(extra) {
+  const h = Object.assign({}, extra || {});
+  if (API_PROXY_BASE) {
+    if (API_APP_TOKEN) h['x-app-token'] = API_APP_TOKEN; // 合言葉（設定時のみ）
+  } else {
+    h['Authorization'] = `Bearer ${state.apiKey}`;        // 直接呼び出し時のみキーを付与
+  }
+  return h;
+}
+
 // ---------- Chat Completions 共通ヘルパー ----------
 // jsonMode=true のとき response_format を json_object にする。
 async function chatCompletion(systemPrompt, userContent, jsonMode) {
@@ -779,12 +821,9 @@ async function chatCompletion(systemPrompt, userContent, jsonMode) {
   };
   if (jsonMode) body.response_format = { type: 'json_object' };
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await fetch(apiEndpoint('chat/completions'), {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${state.apiKey}`,
-      'Content-Type': 'application/json',
-    },
+    headers: apiHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   });
   if (!response.ok) {
@@ -796,7 +835,7 @@ async function chatCompletion(systemPrompt, userContent, jsonMode) {
 
 // ---------- 初回発話の分析（どの項目が埋まっているか） ----------
 async function analyzeInitial(transcript, items) {
-  if (!state.apiKey) {
+  if (!isLiveMode()) {
     await sleep(1500);
     return (state._mockPattern && state._mockPattern.filled) || {};
   }
@@ -827,7 +866,7 @@ async function evaluateAnswer(item, answerTranscript) {
   // モデルや言語に依存せず、聞き直し・不明への誤判定を防ぐ。
   if (isClearNegative(answerTranscript)) return 'なし';
 
-  if (!state.apiKey) {
+  if (!isLiveMode()) {
     await sleep(1000);
     // モック（多言語）：用意した日本語の抽出値を返す
     if (state._mockPattern && state._mockPattern.mockValues && state._mockPattern.mockValues[item.key]) {

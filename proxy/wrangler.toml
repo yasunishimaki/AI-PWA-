@@ -1,0 +1,12 @@
+name = "ai-prediagnosis-proxy"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# CORS許可オリジン（患者アプリの公開元）。複数はカンマ区切り。"*" も可。
+# 例: ALLOWED_ORIGINS = "https://yasunishimaki.github.io"
+[vars]
+ALLOWED_ORIGINS = "*"
+
+# 秘密情報は vars ではなく Secret で設定する:
+#   npx wrangler secret put OPENAI_API_KEY   （必須）
+#   npx wrangler secret put APP_TOKEN        （任意・合言葉）

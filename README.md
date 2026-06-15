@@ -69,6 +69,15 @@ ai-prediagnosis-pwa/
 
 > ⚠️ デモ用にキーをブラウザのlocalStorageに保存します。本番はサーバー側管理が必須（後述「今後の課題」）。
 
+## 🌍 他の人に配布して本番動作させる（バックエンド経由）
+
+端末ごとにキーを入れずに、**URLを配るだけで全員が本番動作**させたい場合は、
+`proxy/`（Cloudflare Worker）をデプロイし、`patient-app/app.js` 冒頭の
+`API_PROXY_BASE` にそのURLを設定します。OpenAIキーはサーバー側に隠れます。
+
+- 手順: **[proxy/README.md](proxy/README.md)**
+- ⚠️ 配布前にOpenAIの使用上限・レート制限・CORS制限を必ず設定（課金・不正利用対策）
+
 ## 🚀 公開（GitHub Pages）
 
 このリポジトリの Settings → Pages → Branch を `main` / `(root)` にして保存すると、数分で公開されます。

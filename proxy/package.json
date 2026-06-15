@@ -1,0 +1,13 @@
+{
+  "name": "ai-prediagnosis-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenAI proxy (Cloudflare Worker) for AI事前問診メモ",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.80.0"
+  }
+}
