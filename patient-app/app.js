@@ -291,6 +291,10 @@ function startInterview() {
   state.patientLang = null;
   state.patientLangName = '';
   state._i18nCache = {};
+  // 前の患者のデータを絶対に持ち越さない（同一端末を使い回しても混ざらないように完全クリア）
+  state.currentMemo = null;
+  state.originalTranscript = '';
+  state.editingItemKey = null;
   state.recordingHandler = handleInitialAudio;
   showScreen('recording');
   resetRecording();
@@ -550,6 +554,7 @@ function finishInterview() {
     });
   }
   state.currentMemo = {
+    id: makeMemoId(),                           // メモ固有のID（履歴の重複判定に使用）
     clinicId: state.template.clinicId,
     clinicName: state.template.clinicName,
     items,
@@ -851,14 +856,20 @@ async function evaluateAnswer(item, answerTranscript) {
 // ============================================
 function saveMemo(silent) {
   if (!state.currentMemo) return;
+  if (!state.currentMemo.id) state.currentMemo.id = makeMemoId(); // 旧データ救済
   const history = JSON.parse(localStorage.getItem('memo_history') || '[]');
-  // 同一メモの二重保存を避ける
-  if (!history.some(h => h.createdAt === state.currentMemo.createdAt)) {
-    history.unshift({ ...state.currentMemo, id: Date.now().toString() });
+  // 同一メモの二重保存を避ける（メモ固有IDで判定）
+  if (!history.some(h => h.id === state.currentMemo.id)) {
+    history.unshift({ ...state.currentMemo });
     if (history.length > 50) history.length = 50;
     localStorage.setItem('memo_history', JSON.stringify(history));
   }
   if (!silent) showToast('メモを保存しました');
+}
+
+// メモ固有のID（時刻＋乱数で衝突しない）
+function makeMemoId() {
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 }
 
 function renderHistory() {
