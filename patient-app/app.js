@@ -900,7 +900,8 @@ function clearHistory() {
 // ユーティリティ
 // ============================================
 function isUnknown(v) {
-  return ['不明', '聞き取れず', 'null', 'なし', '特になし'].includes(String(v).trim());
+  // 「なし」「特になし」は患者の明確な否定回答（＝有効な答え）なので不明扱いしない
+  return ['不明', '聞き取れず', 'null'].includes(String(v).trim());
 }
 
 function formatDate(date) {

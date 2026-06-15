@@ -1,7 +1,7 @@
 // AI事前問診メモ Service Worker
 // プロトタイプ用：最低限のキャッシュ機能
 
-const CACHE_NAME = 'ai-prediagnosis-memo-v1.1-multilingual';
+const CACHE_NAME = 'ai-prediagnosis-memo-v1.2-multilingual';
 const URLS_TO_CACHE = [
   './',
   './index.html',
