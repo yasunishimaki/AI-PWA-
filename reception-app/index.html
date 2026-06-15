@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#357ABD">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>受付システム - 問診メモ受信</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --primary: #357ABD; --primary-dark: #2A5F94;
+      --accent: #2BB673; --warning: #E8A33B;
+      --bg: #EEF2F6; --card: #FFFFFF;
+      --text: #2C3E50; --text-light: #7F8C8D; --border: #DCE3EA;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh; line-height: 1.6;
+    }
+    .topbar {
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      color: white; padding: 18px 28px; display: flex; align-items: center; justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    }
+    .topbar h1 { font-size: 20px; font-weight: 600; }
+    .topbar .clinic { font-size: 13px; opacity: 0.9; }
+
+    .container { max-width: 900px; margin: 0 auto; padding: 28px 24px; }
+    .view { display: none; }
+    .view.active { display: block; }
+
+    .btn {
+      display: inline-block; border: none; border-radius: 12px; padding: 18px 32px;
+      font-size: 18px; font-weight: 600; cursor: pointer; font-family: inherit;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1); transition: transform 0.15s ease;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-accent { background: var(--accent); color: white; }
+    .btn-ghost { background: white; color: var(--text-light); border: 1px solid var(--border); box-shadow: none; }
+    .btn-block { display: block; width: 100%; }
+
+    /* ホーム */
+    .home-hero { text-align: center; padding: 60px 20px; }
+    .home-hero .icon { font-size: 96px; margin-bottom: 20px; }
+    .home-hero h2 { font-size: 28px; margin-bottom: 12px; }
+    .home-hero p { font-size: 16px; color: var(--text-light); margin-bottom: 40px; }
+    .home-hero .btn { font-size: 22px; padding: 24px 48px; }
+
+    /* スキャン */
+    .scan-wrap { text-align: center; }
+    .scan-frame {
+      position: relative; max-width: 520px; margin: 0 auto 20px;
+      border-radius: 20px; overflow: hidden; background: #000; aspect-ratio: 4/3;
+    }
+    #scan-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    #scan-canvas { display: none; }
+    .scan-reticle {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 240px; height: 240px; border: 4px solid rgba(255,255,255,0.9);
+      border-radius: 24px; box-shadow: 0 0 0 2000px rgba(0,0,0,0.25);
+    }
+    .scan-status { font-size: 17px; color: var(--text); margin-bottom: 24px; min-height: 26px; }
+
+    /* メモ表示 */
+    .memo-sheet {
+      background: white; border-radius: 16px; padding: 32px 36px; margin-bottom: 24px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+    }
+    .memo-sheet-head { display: flex; justify-content: space-between; align-items: flex-end;
+      border-bottom: 2px solid var(--primary); padding-bottom: 16px; margin-bottom: 8px; }
+    .memo-sheet-head .title { font-size: 24px; font-weight: 700; }
+    .memo-sheet-head .meta { text-align: right; font-size: 13px; color: var(--text-light); }
+    .memo-sheet-head .meta .clinic { font-size: 15px; color: var(--primary); font-weight: 600; }
+
+    table.memo-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    table.memo-table th, table.memo-table td {
+      text-align: left; vertical-align: top; padding: 14px 12px; border-bottom: 1px solid var(--border);
+      font-size: 17px;
+    }
+    table.memo-table th {
+      width: 200px; color: var(--text-light); font-weight: 600; background: #F7F9FB;
+      border-right: 1px solid var(--border);
+    }
+    table.memo-table tr.highlight th { color: #8B6914; background: #FFF8E6; }
+    table.memo-table tr.highlight td { background: #FFFDF5; font-weight: 600; }
+
+    .memo-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+    .memo-actions .btn { flex: 1; min-width: 180px; }
+
+    .disclaimer { font-size: 12px; color: var(--text-light); margin-top: 16px; line-height: 1.7; }
+
+    /* 印刷用シート（画面では非表示） */
+    .print-only { display: none; }
+
+    @media print {
+      .topbar, .memo-actions, .disclaimer, .scan-wrap { display: none !important; }
+      body { background: white; }
+      .container { padding: 0; max-width: none; }
+      .memo-sheet { box-shadow: none; border-radius: 0; padding: 0; }
+      .print-only { display: block; }
+      table.memo-table th { background: #fff !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>🏥 受付システム（デモ）</h1>
+    <div class="clinic">問診メモ受信端末</div>
+  </div>
+
+  <div class="container">
+    <!-- ホーム -->
+    <div id="view-home" class="view active">
+      <div class="home-hero">
+        <div class="icon">📷</div>
+        <h2>問診メモを受け取る</h2>
+        <p>患者さんのスマホに表示されたQRコードを読み取ります。</p>
+        <button class="btn btn-primary" onclick="startScan()">QRコードを読み取る</button>
+      </div>
+    </div>
+
+    <!-- スキャン -->
+    <div id="view-scan" class="view">
+      <div class="scan-wrap">
+        <div class="scan-frame">
+          <video id="scan-video" muted playsinline></video>
+          <div class="scan-reticle"></div>
+        </div>
+        <canvas id="scan-canvas"></canvas>
+        <div class="scan-status" id="scan-status">カメラを起動しています...</div>
+        <button class="btn btn-ghost" onclick="cancelScan()">キャンセル</button>
+      </div>
+    </div>
+
+    <!-- メモ表示 -->
+    <div id="view-memo" class="view">
+      <div class="memo-sheet">
+        <div class="print-only" style="text-align:center; margin-bottom:16px;">
+          <div style="font-size:20px; font-weight:700;"><span id="memo-print-clinic"></span> 事前問診メモ</div>
+          <div style="font-size:12px; color:#555;">作成日時: <span id="memo-print-date"></span></div>
+        </div>
+        <div class="memo-sheet-head">
+          <div class="title">📝 事前問診メモ</div>
+          <div class="meta">
+            <div class="clinic" id="memo-clinic"></div>
+            <div>作成: <span id="memo-date"></span></div>
+          </div>
+        </div>
+        <table class="memo-table">
+          <tbody id="memo-rows"><!-- 動的生成 --></tbody>
+        </table>
+        <div class="disclaimer">
+          ※ これは患者さん本人がAIで作成した事前メモです。診療上の確認は受付・診察で改めて行ってください。
+        </div>
+      </div>
+
+      <div class="memo-actions">
+        <button class="btn btn-accent" onclick="printMemo()">🖨️ 印刷する</button>
+        <button class="btn btn-primary" onclick="nextPatient()">📷 次の患者さん</button>
+        <button class="btn btn-ghost" onclick="showView('home')">ホームに戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="vendor/lz-string.min.js"></script>
+  <script src="vendor/jsQR.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

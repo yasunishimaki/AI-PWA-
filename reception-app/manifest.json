@@ -1,0 +1,26 @@
+{
+  "name": "受付システム - 問診メモ受信",
+  "short_name": "受付メモ",
+  "description": "患者さんのQRコードを読み取り、事前問診メモを表示・印刷します。",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#EEF2F6",
+  "theme_color": "#357ABD",
+  "lang": "ja",
+  "scope": "./",
+  "icons": [
+    {
+      "src": "../patient-app/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "../patient-app/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

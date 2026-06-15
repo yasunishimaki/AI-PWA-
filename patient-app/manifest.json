@@ -1,0 +1,26 @@
+{
+  "name": "AI事前問診メモ",
+  "short_name": "問診メモ",
+  "description": "症状を話すだけでAIがメモに整理。診察前のヒアリング準備に。",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F5F7FA",
+  "theme_color": "#4A90E2",
+  "lang": "ja",
+  "scope": "./",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
