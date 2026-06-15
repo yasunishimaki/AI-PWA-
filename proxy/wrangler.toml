@@ -3,9 +3,10 @@ main = "src/index.js"
 compatibility_date = "2024-11-01"
 
 # CORS許可オリジン（患者アプリの公開元）。複数はカンマ区切り。"*" も可。
-# 例: ALLOWED_ORIGINS = "https://yasunishimaki.github.io"
+# GitHub Pages はユーザー共通ドメインなので AI-PWA- / ai-prediagnosis-pwa の両方ともこのオリジン。
+# ローカル開発で許可したい場合は ,http://localhost:8753 などを足す。
 [vars]
-ALLOWED_ORIGINS = "*"
+ALLOWED_ORIGINS = "https://yasunishimaki.github.io"
 
 # 秘密情報は vars ではなく Secret で設定する:
 #   npx wrangler secret put OPENAI_API_KEY   （必須）
