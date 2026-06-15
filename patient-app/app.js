@@ -15,7 +15,7 @@
 
 // ====== ここを設定すると配布可能になる ======
 // 例: 'https://ai-prediagnosis-proxy.xxxxx.workers.dev'
-const API_PROXY_BASE = '';
+const API_PROXY_BASE = 'https://ai-prediagnosis-proxy.go-mm-8324.workers.dev';
 // Worker側で APP_TOKEN を設定した場合のみ、同じ合言葉を入れる（任意）
 const API_APP_TOKEN = '';
 // ===========================================
