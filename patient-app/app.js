@@ -443,6 +443,21 @@ async function handleInitialAudio(audioBlob) {
       }
     });
 
+    // 実APIモード：患者が実際に話した訴えに合わせて、AIが深掘り質問を動的生成する。
+    // （話していないこと＝痛みが無いのに「痛みは？」等を聞かないようにする）
+    if (isLiveMode()) {
+      setLoadingText('お話に合わせて質問を準備しています', '少々お待ちください...');
+      try {
+        const extra = await generateDeepeningItems(jaTranscript, state.activeItems);
+        if (extra.length) {
+          state.activeItems = state.activeItems.concat(extra);
+          state.queue = extra.concat(state.queue); // 主訴に沿った質問を先に聞く
+        }
+      } catch (e) {
+        console.error('深掘り質問の生成に失敗（コア項目で続行）:', e);
+      }
+    }
+
     startFollowup();
   } catch (err) {
     console.error('処理エラー:', err);
@@ -453,12 +468,17 @@ async function handleInitialAudio(audioBlob) {
 
 function buildActiveItems(transcript) {
   const t = state.template;
+  // コア項目は主訴に関わらず必ず確認する基本セット
   const items = [...t.coreItems];
-  t.conditionalGroups.forEach(group => {
-    if (group.match.some(kw => transcript.includes(kw))) {
-      group.items.forEach(it => items.push(it));
-    }
-  });
+  // モック（実API未使用）時のみ、キーワードで主訴別テンプレを追加する。
+  // 実APIモードでは、患者の話に合わせてAIが深掘り質問を動的生成する（generateDeepeningItems）。
+  if (!isLiveMode()) {
+    t.conditionalGroups.forEach(group => {
+      if (group.match.some(kw => transcript.includes(kw))) {
+        group.items.forEach(it => items.push(it));
+      }
+    });
+  }
   state.activeItems = items;
 }
 
@@ -858,6 +878,48 @@ ${itemList}
 
   const content = await chatCompletion(systemPrompt, `患者の発話:\n「${transcript}」`, true);
   return JSON.parse(content);
+}
+
+// ---------- 患者の訴えに合わせた深掘り質問をAIが動的生成（実APIモード） ----------
+// 患者が実際に話した内容に沿った追加質問だけを作る。
+// coreItems（基本の確認項目）と重複しないようにし、話していないことは聞かない。
+async function generateDeepeningItems(transcript, coreItems) {
+  if (!isLiveMode()) return []; // モックは主訴別テンプレを使うのでここでは生成しない
+
+  const coreLabels = coreItems.map(i => i.label).join('、');
+  const systemPrompt = `あなたは医療事前問診の補助AIです。患者が最初に話した内容をもとに、その人の「訴え（主訴）」を医学的に具体化するための追加質問を作ります。
+
+【別途必ず確認する基本項目（重複させない）】
+${coreLabels}
+
+【ルール】
+- 患者が実際に話した症状・訴えに沿った質問だけを作る。患者が触れていないこと（例：痛みの話が無いのに「痛みの強さは？」、めまいの話なのに痛みを聞く 等）は絶対に聞かない。
+- 主訴を深掘りする質問を、優先度の高い順に最大4つ（少なくてもよい）。
+- 質問は患者本人がやさしく答えられる、平易で短い日本語の口語にする。
+- 上記の基本項目と内容が重複する質問は作らない。
+- 診断・治療の提案はしない。
+- 各質問に短いラベル（5〜12文字程度。例「めまいの様子」「だるさの程度」）を付ける。
+
+【出力】次のJSONのみ。該当が無ければ {"questions": []}。
+{"questions":[{"label":"短いラベル","question":"患者への質問文"}, ...]}`;
+
+  let parsed;
+  try {
+    const content = await chatCompletion(systemPrompt, `患者の発話:\n「${transcript}」`, true);
+    parsed = JSON.parse(content);
+  } catch (e) {
+    console.error('深掘り質問の生成エラー:', e);
+    return [];
+  }
+  const list = (parsed && Array.isArray(parsed.questions)) ? parsed.questions : [];
+  return list
+    .filter(q => q && q.question && String(q.question).trim())
+    .slice(0, 4)
+    .map((q, i) => ({
+      key: 'dx_' + (i + 1),
+      label: (q.label && String(q.label).trim()) || `補足${i + 1}`,
+      question: String(q.question).trim(),
+    }));
 }
 
 // ---------- 追加質問への回答を評価して値を抽出 ----------

@@ -1,7 +1,7 @@
 // AI事前問診メモ Service Worker
 // プロトタイプ用：最低限のキャッシュ機能
 
-const CACHE_NAME = 'ai-prediagnosis-memo-v1.6-multilingual';
+const CACHE_NAME = 'ai-prediagnosis-memo-v1.7-multilingual';
 const URLS_TO_CACHE = [
   './',
   './index.html',
@@ -38,12 +38,14 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
-// フェッチ時：キャッシュ優先 / API呼び出しはネットワーク優先
+// フェッチ時：静的アセットのみキャッシュ。API呼び出し（POST等）はそのままネットワークへ。
 self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
+  // GET以外（音声送信・チャット等のPOST）はキャッシュ対象外。SWは一切介入しない。
+  if (event.request.method !== 'GET') return;
 
-  // OpenAI APIはキャッシュしない
-  if (url.host.includes('openai.com')) {
+  const url = new URL(event.request.url);
+  // OpenAI / プロキシ(Worker)へのAPI通信はキャッシュしない
+  if (url.host.includes('openai.com') || url.host.includes('workers.dev')) {
     return;
   }
 
