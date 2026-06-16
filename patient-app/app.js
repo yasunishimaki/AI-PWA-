@@ -221,6 +221,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadApiKey();
   applyClinicBranding();
   updateModeBadge();
+  refreshStartScreen();   // 下書き・直近メモに応じてスタート画面のボタンを出し分け
   registerServiceWorker();
 });
 
@@ -250,6 +251,7 @@ function showScreen(screenName) {
   document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
   const target = document.getElementById('screen-' + screenName);
   if (target) target.classList.add('active');
+  if (screenName === 'start') refreshStartScreen();
   if (screenName === 'history') renderHistory();
   if (screenName === 'settings') {
     document.getElementById('apikey-input').value = state.apiKey || '';
@@ -303,6 +305,11 @@ function updateModeBadge() {
 
 // ---------- ① 問診開始（自由発話） ----------
 function startInterview() {
+  // 入力中の下書きがあれば、新規開始で消える旨を確認（再開はresumeInterviewで別途行う）
+  if (loadDraft()) {
+    if (!confirm('入力中の問診メモがあります。\n新しく始めると、その内容は消えます。よろしいですか？')) return;
+  }
+  clearDraft();
   state.activeItems = [];
   state.memoData = {};
   state.queue = [];
@@ -458,6 +465,7 @@ async function handleInitialAudio(audioBlob) {
       }
     }
 
+    saveDraft();   // 初回分析の結果を保存（ここで中断しても続きから再開できる）
     startFollowup();
   } catch (err) {
     console.error('処理エラー:', err);
@@ -496,6 +504,7 @@ async function askNextItem() {
   state.currentItem = state.queue.shift();
   state.attemptCount = 0;
   state.recordingHandler = handleFollowupAudio;
+  saveDraft();   // 直前の回答までの進捗＋現在の質問を保存（中断時はこの質問から再開）
   // 翻訳中はローディング表示（日本語の場合は即時なのでほぼ表示されない）
   if (!isJapaneseLang()) {
     setLoadingText('質問を準備しています', `日本語 → ${state.patientLangName}`);
@@ -605,6 +614,9 @@ function finishInterview() {
     sourceLangName: state.patientLangName || '日本語',
     createdAt: new Date().toISOString(),
   };
+  // 完成したら履歴に保存し、下書きは破棄（＝完成メモへ昇格）
+  saveMemo(true);
+  clearDraft();
   renderMemo();
   showScreen('memo');
 }
@@ -996,6 +1008,113 @@ function saveMemo(silent) {
 // メモ固有のID（時刻＋乱数で衝突しない）
 function makeMemoId() {
   return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+// ============================================
+// 下書き（途中保存）と再開
+// ============================================
+// 問診の途中状態を端末に保存し、中断後に「続きから」再開できるようにする。
+// 時間では消えない（数時間後の提出にも対応）。完了 or 明示的な破棄でのみ消える。
+const DRAFT_KEY = 'memo_draft';
+
+function saveDraft() {
+  try {
+    const draft = {
+      clinicId: state.template.clinicId,
+      activeItems: state.activeItems,
+      memoData: state.memoData,
+      queue: state.queue,
+      currentItem: state.currentItem,
+      fullTranscript: state.fullTranscript,
+      originalTranscript: state.originalTranscript || '',
+      patientLang: state.patientLang,
+      patientLangName: state.patientLangName,
+      i18nCache: state._i18nCache || {},
+      updatedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch (e) {
+    console.error('下書き保存エラー:', e);
+  }
+}
+
+function loadDraft() {
+  try {
+    const d = localStorage.getItem(DRAFT_KEY);
+    const draft = d ? JSON.parse(d) : null;
+    // 中身が空（活動項目なし）の下書きは無効扱い
+    if (!draft || !Array.isArray(draft.activeItems) || draft.activeItems.length === 0) return null;
+    return draft;
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearDraft() {
+  localStorage.removeItem(DRAFT_KEY);
+}
+
+// 下書きから問診を再開する
+function resumeInterview() {
+  const draft = loadDraft();
+  if (!draft) { showToast('続きのデータが見つかりませんでした'); refreshStartScreen(); return; }
+
+  state.template = CLINIC_TEMPLATES[draft.clinicId] || state.template;
+  state.activeItems = draft.activeItems || [];
+  state.memoData = draft.memoData || {};
+  state.queue = draft.queue || [];
+  state.attemptCount = 0;
+  state.fullTranscript = draft.fullTranscript || '';
+  state.originalTranscript = draft.originalTranscript || '';
+  state.patientLang = draft.patientLang || null;
+  state.patientLangName = draft.patientLangName || '';
+  state._i18nCache = draft.i18nCache || {};
+  state.currentMemo = null;
+  state.editingItemKey = null;
+  state.currentItem = null;
+  state._mockPattern = null;
+  // 中断時に提示中だった質問が未回答なら、先頭に戻して聞き直す
+  if (draft.currentItem && !state.memoData[draft.currentItem.key]) {
+    state.queue.unshift(draft.currentItem);
+  }
+  state.recordingHandler = handleFollowupAudio;
+  startFollowup(); // 残りの質問から再開（無ければ確定画面へ）
+}
+
+// 直近に作成した完成メモのQRを再表示（受付で出し直す用）
+function showLastMemoQR() {
+  const history = JSON.parse(localStorage.getItem('memo_history') || '[]');
+  if (!history.length) { showToast('表示できるメモがありません'); refreshStartScreen(); return; }
+  state.currentMemo = history[0];
+  showQR();
+}
+
+// スタート画面のボタンを、下書き・直近メモの有無に応じて出し分ける
+function refreshStartScreen() {
+  const draft = loadDraft();
+  const history = JSON.parse(localStorage.getItem('memo_history') || '[]');
+  const last = history[0];
+
+  // 続きから
+  const resumeBtn = document.getElementById('resume-btn');
+  if (resumeBtn) {
+    if (draft) {
+      const total = draft.activeItems.length;
+      const answered = draft.activeItems.filter(it => draft.memoData && draft.memoData[it.key]).length;
+      const chief = (draft.memoData && draft.memoData.chiefComplaint)
+        || (draft.fullTranscript ? draft.fullTranscript.slice(0, 16) : '問診');
+      resumeBtn.innerHTML = `⏯ 前回の続きから<br><span style="font-size:12px;opacity:.85;">${escapeHtml(chief)}・${answered}/${total}項目</span>`;
+      resumeBtn.style.display = 'block';
+    } else {
+      resumeBtn.style.display = 'none';
+    }
+  }
+
+  // 直近のQRを再表示
+  const lastQrBtn = document.getElementById('last-qr-btn');
+  if (lastQrBtn) {
+    lastQrBtn.style.display = last ? 'block' : 'none';
+  }
 }
 
 function renderHistory() {

@@ -217,9 +217,17 @@
         </div>
       </div>
 
+      <button class="btn btn-accent" id="resume-btn" style="display:none;" onclick="resumeInterview()">
+        ⏯ 前回の続きから
+      </button>
+
       <button class="btn start-cta" onclick="startInterview()">
         <span class="icon">🎙️</span>
         問診を始める
+      </button>
+
+      <button class="btn btn-secondary" id="last-qr-btn" style="display:none;" onclick="showLastMemoQR()">
+        📱 受付でQRを見せる（直近のメモ）
       </button>
 
       <button class="btn btn-secondary" onclick="showScreen('history')">
