@@ -1,7 +1,7 @@
 // AI事前問診メモ Service Worker
 // プロトタイプ用：最低限のキャッシュ機能
 
-const CACHE_NAME = 'ai-prediagnosis-memo-v1.9-multilingual';
+const CACHE_NAME = 'ai-prediagnosis-memo-v2.0-multilingual';
 const URLS_TO_CACHE = [
   './',
   './index.html',
@@ -38,7 +38,8 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
-// フェッチ時：静的アセットのみキャッシュ。API呼び出し（POST等）はそのままネットワークへ。
+// フェッチ時：ネットワーク優先（オンライン時は常に最新を取得し、キャッシュは
+// オフライン時のフォールバックとして使う）。アプリ更新が即時に反映される。
 self.addEventListener('fetch', event => {
   // GET以外（音声送信・チャット等のPOST）はキャッシュ対象外。SWは一切介入しない。
   if (event.request.method !== 'GET') return;
@@ -50,10 +51,15 @@ self.addEventListener('fetch', event => {
   }
 
   event.respondWith(
-    caches.match(event.request).then(response => {
-      return response || fetch(event.request);
-    }).catch(() => {
-      return new Response('オフラインです', { status: 503 });
-    })
+    fetch(event.request)
+      .then(response => {
+        // 取得できたら最新をキャッシュ更新（オフライン用）
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then(c => c.put(event.request, copy)).catch(() => {});
+        return response;
+      })
+      .catch(() =>
+        caches.match(event.request).then(r => r || new Response('オフラインです', { status: 503 }))
+      )
   );
 });
