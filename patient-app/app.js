@@ -458,7 +458,19 @@ async function handleInitialAudio(audioBlob) {
         const extra = await generateDeepeningItems(jaTranscript, state.activeItems);
         if (extra.length) {
           state.activeItems = state.activeItems.concat(extra);
-          state.queue = extra.concat(state.queue); // 主訴に沿った質問を先に聞く
+          // 深掘り項目も、最初の発話で既に話している分は先に埋める（同じことを聞き直さない）
+          let extraFilled = {};
+          try { extraFilled = await analyzeInitial(jaTranscript, extra); } catch (e) {}
+          const unfilledExtra = [];
+          extra.forEach(it => {
+            const v = extraFilled[it.key];
+            if (v && String(v).trim() && !isUnknown(v)) {
+              state.memoData[it.key] = String(v).trim();
+            } else {
+              unfilledExtra.push(it);
+            }
+          });
+          state.queue = unfilledExtra.concat(state.queue); // 主訴に沿った（未充足の）質問を先に聞く
         }
       } catch (e) {
         console.error('深掘り質問の生成に失敗（コア項目で続行）:', e);
