@@ -503,6 +503,7 @@ function startFollowup() {
 async function askNextItem() {
   state.currentItem = state.queue.shift();
   state.attemptCount = 0;
+  state.currentItemAnswers = [];   // この項目への回答を蓄積（再質問の答えを合わせて解釈）
   state.recordingHandler = handleFollowupAudio;
   saveDraft();   // 直前の回答までの進捗＋現在の質問を保存（中断時はこの質問から再開）
   // 翻訳中はローディング表示（日本語の場合は即時なのでほぼ表示されない）
@@ -545,7 +546,12 @@ async function handleFollowupAudio(audioBlob) {
   showScreen('followup-loading');
   try {
     const answer = await transcribeAudio(audioBlob, state.currentItem);
-    const value = await evaluateAnswer(state.currentItem, answer);
+    // 同じ項目への回答を蓄積し、再質問の答えを最初の答えと「合わせて」解釈する
+    if (!Array.isArray(state.currentItemAnswers)) state.currentItemAnswers = [];
+    if (answer && String(answer).trim()) state.currentItemAnswers.push(String(answer).trim());
+    const combined = state.currentItemAnswers.join('。');
+
+    const value = await evaluateAnswer(state.currentItem, combined);
 
     if (value && !isUnknown(value)) {
       state.memoData[state.currentItem.key] = String(value).trim();
@@ -559,17 +565,31 @@ async function handleFollowupAudio(audioBlob) {
         showScreen('followup');
         resetRecording();
       } else {
-        // 2回試して埋まらなければ「不明」で記録し次へ
-        state.memoData[state.currentItem.key] = '不明';
+        // 抽出できなくても、患者が具体的に話していればその内容を残す（不明で捨てない）
+        state.memoData[state.currentItem.key] = await bestPatientAnswer(state.currentItemAnswers);
         askOrFinish();
       }
     }
   } catch (err) {
     console.error('回答処理エラー:', err);
-    // 失敗時は不明扱いにして進める（デモを止めない）
-    state.memoData[state.currentItem.key] = '不明';
+    // 失敗時も、聞き取れた発言があれば残す（無ければ不明）
+    state.memoData[state.currentItem.key] = await bestPatientAnswer(state.currentItemAnswers);
     askOrFinish();
   }
+}
+
+// 抽出に失敗した時の最終手段：患者が実際に話した内容を残す。
+// 「わからない」等しか無ければ「不明」を返す。メモは日本語で保つため必要なら翻訳する。
+async function bestPatientAnswer(answers) {
+  const texts = (answers || [])
+    .map(a => String(a || '').trim())
+    .filter(a => a && !/わからない|わかりません|覚えていない|思い出せ|不明|not sure|don'?t know|no idea/i.test(a));
+  if (!texts.length) return '不明';
+  let raw = texts.join('。');
+  if (!isJapaneseLang()) {
+    try { raw = await translateToJapanese(raw); } catch (e) { /* 失敗時は原文のまま */ }
+  }
+  return raw.trim() || '不明';
 }
 
 function askOrFinish() {
@@ -956,16 +976,18 @@ async function evaluateAnswer(item, answerTranscript) {
 その回答から、この項目に記載すべき内容を抽出してください。
 
 【ルール】
-- 回答が項目に答えている場合：医師が読んで分かる必要十分な文で value にまとめる（数値や固有名詞は残す）。
-- 「いいえ」「ありません」「ないです」「特にない」「問題ありません」など【明確な否定】は、答えが「無い」という有効な回答である。この場合は value を「なし」とする（絶対に null にしない）。
-- value を null にしてよいのは、「わからない」「覚えていない」など本人が【不明】と述べた場合や、質問と無関係で内容が読み取れない場合だけ。
-- 推測で補わない。診断・治療提案はしない。
+- 回答に少しでも関連する情報があれば、たとえ断片的・曖昧でも、患者が言ったことを尊重して value にまとめる（数値や固有名詞は残す）。完璧な情報でなくてよい。
+- 聞き直した複数回の発言は合わせて解釈し、後の発言で補足された内容も反映する。
+- 「いいえ」「ありません」「ないです」「特にない」「問題ありません」など【明確な否定】は有効な回答。value を「なし」とする（絶対に null にしない）。
+- value を null にしてよいのは、本人が「わからない」「覚えていない」と述べた場合や、発言がこの項目と全く無関係で関連情報が一切読み取れない場合【だけ】。少しでも関連する内容があれば null にしない。
+- 推測で大きく補わない。診断・治療提案はしない。
 - value は、患者が何語で答えても【必ず日本語】で記述する。
 
 【例】
 - 回答「いいえ、ありません」→ {"value": "なし"}
 - 回答「特に飲んでいる薬はないです」→ {"value": "なし"}
 - 回答「降圧薬を毎日飲んでいます」→ {"value": "降圧薬を毎日服用"}
+- 回答「3日前くらい。だんだん強くなった」→ {"value": "3日前ごろから、だんだん強くなった"}
 - 回答「うーん、ちょっとわからないです」→ {"value": null}
 
 【出力】 {"value": 文字列 または null} の JSON のみ。`;
