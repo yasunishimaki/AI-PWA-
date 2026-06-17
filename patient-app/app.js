@@ -322,6 +322,7 @@ function startInterview() {
   // 前の患者のデータを絶対に持ち越さない（同一端末を使い回しても混ざらないように完全クリア）
   state.currentMemo = null;
   state.originalTranscript = '';
+  state.initialSummary = '';
   state.editingItemKey = null;
   state.recordingHandler = handleInitialAudio;
   showScreen('recording');
@@ -432,12 +433,18 @@ async function handleInitialAudio(audioBlob) {
       jaTranscript = await translateToJapanese(originalTranscript);
     }
     state.fullTranscript = jaTranscript;
+    state.initialSummary = jaTranscript; // フォールバック：要約に失敗しても発話そのものを残す
 
     // 主訴別グループの判定（日本語化した発話にキーワードが含まれるか）
     buildActiveItems(jaTranscript);
 
     setLoadingText('内容を整理しています', '不足している項目を確認中...');
-    const filled = await analyzeInitial(jaTranscript, state.activeItems);
+    // 要約（メモ冒頭用）と項目抽出を並列実行
+    const [summary, filled] = await Promise.all([
+      summarizeInitial(jaTranscript),
+      analyzeInitial(jaTranscript, state.activeItems),
+    ]);
+    if (summary && summary.trim()) state.initialSummary = summary.trim();
 
     // 結果を memoData に反映し、不足項目を queue に積む
     state.queue = [];
@@ -633,6 +640,14 @@ function finishInterview() {
       key: '_sourceLang', label: '使用言語（原文）', icon: '🌐',
       value: `${state.patientLangName}（自動検出 → 日本語に翻訳済み）`,
       highlight: true,
+    });
+  }
+  // 患者が最初に話した内容の要約を【必ずメモ冒頭】に残す（抽出に失敗しても訴えを失わない）
+  const summary = (state.initialSummary || state.fullTranscript || '').trim();
+  if (summary) {
+    items.unshift({
+      key: '_initialSummary', label: '最初のお話（要約）', icon: '🗣️',
+      value: summary, highlight: true,
     });
   }
   state.currentMemo = {
@@ -897,6 +912,26 @@ async function chatCompletion(systemPrompt, userContent, jsonMode) {
   return result.choices[0].message.content;
 }
 
+// ---------- 患者が最初に話した内容の要約（メモ冒頭に必ず残す） ----------
+async function summarizeInitial(transcript) {
+  if (!transcript) return '';
+  if (!isLiveMode()) {
+    // モック：発話そのものを要約代わりに使う
+    return transcript;
+  }
+  const systemPrompt = `あなたは医療事前問診の補助AIです。患者が最初に話した内容を、医師がひと目で把握できる簡潔な日本語の要約（1〜2文）にまとめてください。
+- 述べられた事実（症状・経過・期間・程度など）だけを含める。推測・診断はしない。
+- 患者が何語で話していても【日本語】で出力する。
+- 要約文のみを返す（前置きや注釈は不要）。`;
+  try {
+    const s = await chatCompletion(systemPrompt, `患者の発話:\n「${transcript}」`, false);
+    return (s || transcript).trim();
+  } catch (e) {
+    console.error('要約エラー:', e);
+    return transcript; // 失敗時は発話そのものを残す
+  }
+}
+
 // ---------- 初回発話の分析（どの項目が埋まっているか） ----------
 async function analyzeInitial(transcript, items) {
   if (!isLiveMode()) {
@@ -1061,6 +1096,7 @@ function saveDraft() {
       currentItem: state.currentItem,
       fullTranscript: state.fullTranscript,
       originalTranscript: state.originalTranscript || '',
+      initialSummary: state.initialSummary || '',
       patientLang: state.patientLang,
       patientLangName: state.patientLangName,
       i18nCache: state._i18nCache || {},
@@ -1100,6 +1136,7 @@ function resumeInterview() {
   state.attemptCount = 0;
   state.fullTranscript = draft.fullTranscript || '';
   state.originalTranscript = draft.originalTranscript || '';
+  state.initialSummary = draft.initialSummary || '';
   state.patientLang = draft.patientLang || null;
   state.patientLangName = draft.patientLangName || '';
   state._i18nCache = draft.i18nCache || {};
