@@ -82,14 +82,14 @@ ai-prediagnosis-pwa/
 
 このリポジトリの Settings → Pages → Branch を `main` / `(root)` にして保存すると、数分で公開されます。
 
-- 患者用: `https://<ユーザー名>.github.io/ai-prediagnosis-pwa/patient-app/`
-- 受付用: `https://<ユーザー名>.github.io/ai-prediagnosis-pwa/reception-app/`
+- 患者用（多言語対応版）: `https://yasunishimaki.github.io/AI-PWA-/patient-app/`
+- 受付用: `https://yasunishimaki.github.io/AI-PWA-/reception-app/`
 
 > マイク・カメラはHTTPSでのみ動作します。GitHub Pages はHTTPSなのでそのまま使えます（`localhost` も可）。
 
 ローカル確認:
 ```bash
-cd ai-prediagnosis-pwa
+cd AI-PWA-
 python -m http.server 8000
 # 患者用 http://localhost:8000/patient-app/
 # 受付用 http://localhost:8000/reception-app/

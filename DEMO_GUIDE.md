@@ -8,11 +8,12 @@
 
 - [ ] GitHub Pages を有効化（README参照）。または同一Wi-Fi上のPCで `python -m http.server 8000` を起動
 - [ ] **患者用スマホ**でURLを開けるか確認
-  - `https://<ユーザー名>.github.io/ai-prediagnosis-pwa/patient-app/`
+  - `https://yasunishimaki.github.io/AI-PWA-/patient-app/`
 - [ ] **受付用iPad（Safari）**でURLを開けるか確認
-  - `https://<ユーザー名>.github.io/ai-prediagnosis-pwa/reception-app/`
-- [ ] スマホで設定（⚙️）→ **OpenAI APIキー**を入力し「本番API」表示を確認
-  - キーを入れない場合は「モック」で動作（音声内容に関わらず固定シナリオ）
+  - `https://yasunishimaki.github.io/AI-PWA-/reception-app/`
+- [ ] スマホでアプリを開き、モード表示が **「🟢 本番API（サーバー）」** になっているか確認
+  - 本リポジトリはCloudflare Worker経由でAPIキーをサーバー側に保持しているため、**端末ごとのキー入力は不要**（URLを開くだけで本番動作）
+  - 「🟡 モック」表示の場合は古いキャッシュの可能性 → 再読み込み（タブを閉じて開き直す）
 - [ ] スマホの**マイク許可**、iPadの**カメラ許可**を一度通しておく
 - [ ] iPadと**AirPrint対応プリンタ**を同じWi-Fiに接続し、テスト印刷
 - [ ] 通信が不安な会場では、スマホのテザリング等の代替回線を用意
