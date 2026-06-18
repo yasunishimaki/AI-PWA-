@@ -439,14 +439,16 @@ async function handleInitialAudio(audioBlob) {
     buildActiveItems(jaTranscript);
 
     setLoadingText('内容を整理しています', '不足している項目を確認中...');
-    // 要約（メモ冒頭用）と項目抽出を並列実行
-    const [summary, filled] = await Promise.all([
+    // 要約（メモ冒頭用）と「項目抽出＋深掘り立案」を並列実行。
+    // 抽出と質問作成を1回のAI判断にまとめることで、既に話したことを聞き返さない。
+    const [summary, plan] = await Promise.all([
       summarizeInitial(jaTranscript),
-      analyzeInitial(jaTranscript, state.activeItems),
+      analyzeAndPlan(jaTranscript, state.activeItems),
     ]);
     if (summary && summary.trim()) state.initialSummary = summary.trim();
 
-    // 結果を memoData に反映し、不足項目を queue に積む
+    // 抽出結果を memoData に反映し、埋まらなかった基本項目だけ queue に積む
+    const filled = plan.filled || {};
     state.queue = [];
     state.activeItems.forEach(item => {
       const v = filled[item.key];
@@ -457,30 +459,20 @@ async function handleInitialAudio(audioBlob) {
       }
     });
 
-    // 実APIモード：患者が実際に話した訴えに合わせて、AIが深掘り質問を動的生成する。
-    // （話していないこと＝痛みが無いのに「痛みは？」等を聞かないようにする）
-    if (isLiveMode()) {
-      setLoadingText('お話に合わせて質問を準備しています', '少々お待ちください...');
-      try {
-        const extra = await generateDeepeningItems(jaTranscript, state.activeItems);
-        if (extra.length) {
-          state.activeItems = state.activeItems.concat(extra);
-          // 深掘り項目も、最初の発話で既に話している分は先に埋める（同じことを聞き直さない）
-          let extraFilled = {};
-          try { extraFilled = await analyzeInitial(jaTranscript, extra); } catch (e) {}
-          const unfilledExtra = [];
-          extra.forEach(it => {
-            const v = extraFilled[it.key];
-            if (v && String(v).trim() && !isUnknown(v)) {
-              state.memoData[it.key] = String(v).trim();
-            } else {
-              unfilledExtra.push(it);
-            }
-          });
-          state.queue = unfilledExtra.concat(state.queue); // 主訴に沿った（未充足の）質問を先に聞く
-        }
-      } catch (e) {
-        console.error('深掘り質問の生成に失敗（コア項目で続行）:', e);
+    // 深掘り質問（実APIモードのみ）。既に話した内容は analyzeAndPlan が除外済みなので、
+    // そのまま質問キューに積んでよい（聞き返しは起きない）。
+    if (isLiveMode() && Array.isArray(plan.questions) && plan.questions.length) {
+      const extra = plan.questions
+        .filter(q => q && q.question && String(q.question).trim())
+        .slice(0, 3)
+        .map((q, i) => ({
+          key: 'dx_' + (i + 1),
+          label: (q.label && String(q.label).trim()) || `補足${i + 1}`,
+          question: String(q.question).trim(),
+        }));
+      if (extra.length) {
+        state.activeItems = state.activeItems.concat(extra);
+        state.queue = extra.concat(state.queue); // 主訴に沿った質問を先に聞く
       }
     }
 
@@ -498,7 +490,7 @@ function buildActiveItems(transcript) {
   // コア項目は主訴に関わらず必ず確認する基本セット
   const items = [...t.coreItems];
   // モック（実API未使用）時のみ、キーワードで主訴別テンプレを追加する。
-  // 実APIモードでは、患者の話に合わせてAIが深掘り質問を動的生成する（generateDeepeningItems）。
+  // 実APIモードでは、患者の話に合わせてAIが深掘り質問を動的生成する（analyzeAndPlan）。
   if (!isLiveMode()) {
     t.conditionalGroups.forEach(group => {
       if (group.match.some(kw => transcript.includes(kw))) {
@@ -932,73 +924,68 @@ async function summarizeInitial(transcript) {
   }
 }
 
-// ---------- 初回発話の分析（どの項目が埋まっているか） ----------
-async function analyzeInitial(transcript, items) {
+// ---------- 初回発話の解析＋深掘り質問の立案（1回のAI呼び出しで実施） ----------
+// ①基本項目の抽出（断片でも取りこぼさない）と、②まだ話していないことだけの深掘り質問を、
+// 同じ発話に対する1回の判断でまとめて行う。これにより「既に話したことを聞き返す」を防ぐ。
+// 入力 transcript は日本語化済みの発話。戻り値: { filled: {項目key: 文字列|null}, questions: [{label, question}] }
+async function analyzeAndPlan(transcript, items) {
   if (!isLiveMode()) {
     await sleep(1500);
-    return (state._mockPattern && state._mockPattern.filled) || {};
+    // モックは従来どおり（深掘りは conditionalGroups 側で処理するため空）
+    return { filled: (state._mockPattern && state._mockPattern.filled) || {}, questions: [] };
   }
 
   const itemList = items.map(i => `- ${i.key}: ${i.label}（${i.question}）`).join('\n');
-  const systemPrompt = `あなたは医療事前問診の補助AIです。患者の最初の自由な発話から、以下の問診項目それぞれについて、発話内で語られている情報を抽出します。
+  const systemPrompt = `あなたは医療事前問診の補助AIです。患者の最初の自由な発話を読み、次の2つを同時に行います。
 
-【問診項目】
+【作業1：基本項目の抽出】
+以下の各項目について、発話の中で患者が「少しでも触れている」内容を抜き出します。
 ${itemList}
-
-【ルール】
-- 各項目について、発話から読み取れる内容を「医師が読んで分かる必要十分な文」でまとめる。単語ではなく具体的に。
-- 数値・固有名詞・時間表現（「38.5度」「昨夜21時ごろ」など）はそのまま残す。
-- 発話内に該当する情報が無い項目は、値を null にする（推測で埋めない）。
-- 診断・治療の提案はしない。患者の言葉を尊重する。
+- 患者が少しでも触れた項目は、完全な文でなくても、患者の言葉のまま抽出する（例：「3か月前から」「ズキズキする」「後頭部」などの断片でも必ず抽出する）。
+- 数値・時間・固有名詞（「38.5度」「昨夜21時ごろ」など）はそのまま残す。
+- その項目について発話で「一切触れていない」ときだけ null にする。迷う場合は、述べられた言葉をそのまま入れる（取りこぼさない）。
+- ただし、患者が述べていない内容を推測で作ってはいけない（捏造禁止）。曖昧なら患者の言葉のまま短く入れる。
 - 抽出する値は、患者が何語で話していても【必ず日本語】で記述する。
 
-【出力】
-キーを項目key、値を抽出文字列または null とする JSON オブジェクトのみを返す。`;
-
-  const content = await chatCompletion(systemPrompt, `患者の発話:\n「${transcript}」`, true);
-  return JSON.parse(content);
-}
-
-// ---------- 患者の訴えに合わせた深掘り質問をAIが動的生成（実APIモード） ----------
-// 患者が実際に話した内容に沿った追加質問だけを作る。
-// coreItems（基本の確認項目）と重複しないようにし、話していないことは聞かない。
-async function generateDeepeningItems(transcript, coreItems) {
-  if (!isLiveMode()) return []; // モックは主訴別テンプレを使うのでここでは生成しない
-
-  const coreLabels = coreItems.map(i => i.label).join('、');
-  const systemPrompt = `あなたは医療事前問診の補助AIです。患者が最初に話した内容をもとに、その人の「訴え（主訴）」を医学的に具体化するための追加質問を作ります。
-
-【別途必ず確認する基本項目（重複させない）】
-${coreLabels}
-
-【ルール】
-- 患者が実際に話した症状・訴えに沿った質問だけを作る。患者が触れていないこと（例：痛みの話が無いのに「痛みの強さは？」、めまいの話なのに痛みを聞く 等）は絶対に聞かない。
-- 主訴を深掘りする質問を、優先度の高い順に最大4つ（少なくてもよい）。
-- 質問は患者本人がやさしく答えられる、平易で短い日本語の口語にする。
-- 上記の基本項目と内容が重複する質問は作らない。
+【作業2：深掘り質問の作成】
+患者の主訴を医学的に具体化するための追加質問を作ります。
+- 患者が実際に話した症状に沿った質問だけにする。話していないこと（痛みの話が無いのに痛みの強さ等）は聞かない。
+- 【最重要】作業1で抽出できた内容（＝患者が既に話したこと）は、絶対に質問しない。まだ話していない点だけを質問する。
+- 基本項目と重複しない。優先度の高い順に最大3つ（少なくてもよい／無ければ空配列）。
+- 患者本人がやさしく答えられる、平易で短い日本語の口語。各質問に短いラベル（5〜12文字。例「痛みの強さ」「経過の様子」）を付ける。
 - 診断・治療の提案はしない。
-- 各質問に短いラベル（5〜12文字程度。例「めまいの様子」「だるさの程度」）を付ける。
 
-【出力】次のJSONのみ。該当が無ければ {"questions": []}。
-{"questions":[{"label":"短いラベル","question":"患者への質問文"}, ...]}`;
+【出力】次のJSONのみを返す（説明文は不要）。値はすべて日本語。
+{"filled": {"項目key": "抽出文字列 または null"}, "questions": [{"label": "短いラベル", "question": "質問文"}]}`;
 
-  let parsed;
   try {
-    const content = await chatCompletion(systemPrompt, `患者の発話:\n「${transcript}」`, true);
-    parsed = JSON.parse(content);
+    const response = await fetch(apiEndpoint('chat/completions'), {
+      method: 'POST',
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `患者の発話:\n「${transcript}」` },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`GPT-4o API エラー: ${response.status} - ${await response.text()}`);
+    }
+    const result = await response.json();
+    const parsed = JSON.parse(result.choices[0].message.content) || {};
+    return {
+      filled: (parsed.filled && typeof parsed.filled === 'object') ? parsed.filled : {},
+      questions: Array.isArray(parsed.questions) ? parsed.questions : [],
+    };
   } catch (e) {
-    console.error('深掘り質問の生成エラー:', e);
-    return [];
+    // 解析に失敗してもフローは止めない（基本項目をそのまま質問して続行）
+    console.error('初回解析エラー（基本項目で続行）:', e);
+    return { filled: {}, questions: [] };
   }
-  const list = (parsed && Array.isArray(parsed.questions)) ? parsed.questions : [];
-  return list
-    .filter(q => q && q.question && String(q.question).trim())
-    .slice(0, 4)
-    .map((q, i) => ({
-      key: 'dx_' + (i + 1),
-      label: (q.label && String(q.label).trim()) || `補足${i + 1}`,
-      question: String(q.question).trim(),
-    }));
 }
 
 // ---------- 追加質問への回答を評価して値を抽出 ----------
