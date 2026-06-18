@@ -562,6 +562,15 @@ async function handleFollowupAudio(audioBlob) {
     if (answer && String(answer).trim()) state.currentItemAnswers.push(String(answer).trim());
     const combined = state.currentItemAnswers.join('。');
 
+    // 「わからない／測っていない」等と明言したら、聞き直さず「不明」で確定して次へ進む。
+    // ただし、それ以前に具体的な回答があれば握りつぶさず通常の評価に回す。
+    if (answer && isClearUnknown(answer) &&
+        !state.currentItemAnswers.some(a => !isClearUnknown(a))) {
+      state.memoData[state.currentItem.key] = '不明';
+      askOrFinish();
+      return;
+    }
+
     const value = await evaluateAnswer(state.currentItem, combined);
 
     if (value && !isUnknown(value)) {
@@ -1044,6 +1053,17 @@ function isClearNegative(text) {
   if (/(はい|あります|います|服用|服薬|通院|持病|飲んでいます|使ってい|やってい|[0-9０-９])/.test(t)) return false;
   // 明確な否定表現
   return /(いいえ|いえ|ありません|ございません|ないです|ない$|^なし$|なしです|特にない|特になし|特には|いません|問題ありません|問題ない|大丈夫)/.test(t);
+}
+
+// 明確な「わからない／不明」回答かどうか（聞き直さず「不明」で確定してよい回答）。
+// 数値や具体的な訴えを含む場合は false にして、情報を握りつぶさない。
+function isClearUnknown(text) {
+  const t = String(text || '').replace(/[\s　、。!！?？.,]/g, '');
+  if (!t) return false;
+  if (/[0-9０-９]/.test(t)) return false; // 数値があれば具体回答とみなす
+  // 具体的な訴え・肯定を含む場合は不明として握りつぶさない
+  if (/(痛|つら|苦し|あります|います|出てい|腫れ|咳|吐き|下痢|めまい|しびれ|だるい|熱っぽ)/.test(t)) return false;
+  return /(わからな|わかりませ|分からな|分かりませ|不明|覚えてい?ない|記憶にない|思い出せ|知らない|測ってい?ない|計ってい?ない|はかってい?ない)/.test(t);
 }
 
 // ============================================
