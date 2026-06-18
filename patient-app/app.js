@@ -424,6 +424,13 @@ async function handleInitialAudio(audioBlob) {
   try {
     // 文字起こし（言語は自動検出 → state.patientLang に保存される）
     const originalTranscript = await transcribeAudio(audioBlob);
+    if (!originalTranscript || !originalTranscript.trim()) {
+      // 音声が拾えなかった（無音/幻聴を弾いた）→ メモを作らず録音し直してもらう
+      showScreen('recording');
+      resetRecording();
+      showToast('うまく聞き取れませんでした。もう一度、はっきりお話しください');
+      return;
+    }
     state.originalTranscript = originalTranscript;
 
     // 日本語以外なら日本語へ翻訳（以降の処理・メモはすべて日本語で行う）
@@ -571,6 +578,21 @@ async function handleFollowupAudio(audioBlob) {
     if (!Array.isArray(state.currentItemAnswers)) state.currentItemAnswers = [];
     if (answer && String(answer).trim()) state.currentItemAnswers.push(String(answer).trim());
     const combined = state.currentItemAnswers.join('。');
+
+    // 何も聞き取れなかった（無音/幻聴を弾いた）→ 即座に聞き直す（評価APIは呼ばない）
+    if ((!answer || !String(answer).trim()) && !combined) {
+      state.attemptCount++;
+      if (state.attemptCount < MAX_FOLLOWUP_ATTEMPTS) {
+        state.recordingHandler = handleFollowupAudio;
+        await renderFollowupQuestion(state.currentItem.question, true);
+        showScreen('followup');
+        resetRecording();
+      } else {
+        state.memoData[state.currentItem.key] = await bestPatientAnswer(state.currentItemAnswers);
+        askOrFinish();
+      }
+      return;
+    }
 
     // 「わからない／測っていない」等と明言したら、聞き直さず「不明」で確定して次へ進む。
     // ただし、それ以前に具体的な回答があれば握りつぶさず通常の評価に回す。
@@ -781,6 +803,26 @@ function buildQRPayload(memo) {
 // ---------- Whisper（文字起こし＋言語自動検出） ----------
 // language は固定せず、Whisperに言語を自動検出させる。
 // 初回の発話で検出した言語を state.patientLang に保存する。
+// ---------- 音声ヘルパー（フォーマット判定・無音/幻聴対策） ----------
+const MIN_AUDIO_BYTES = 800; // これ未満は実質無音とみなしWhisperに送らない
+
+// 録音フォーマットに合った拡張子のファイル名を返す（Whisperは拡張子でも形式を判別するため重要）。
+function audioFileName(blob) {
+  const t = ((blob && blob.type) || '').toLowerCase();
+  if (t.includes('mp4') || t.includes('m4a') || t.includes('aac')) return 'recording.mp4';
+  if (t.includes('ogg')) return 'recording.ogg';
+  if (t.includes('wav')) return 'recording.wav';
+  if (t.includes('mpeg') || t.includes('mp3')) return 'recording.mp3';
+  return 'recording.webm';
+}
+
+// 無音にWhisperが学習データから作文する「幻聴」を弾く（医療問診ではまず出ない定番フレーズ）。
+function looksHallucinated(text) {
+  const t = String(text || '').trim();
+  if (!t) return true;
+  return /ご(視聴|清聴)(いただき)?ありがとう|チャンネル登録|高評価|字幕|サブタイトル|thanks? for watching|please subscribe/i.test(t);
+}
+
 async function transcribeAudio(audioBlob, item) {
   if (!isLiveMode()) {
     await sleep(1500);
@@ -798,8 +840,11 @@ async function transcribeAudio(audioBlob, item) {
     return state.patientLang === 'en' ? "I'm not sure." : 'わかりません';
   }
 
+  // 無音・短すぎる録音はWhisperに送らない（送ると学習データからの“幻聴”メモになる）
+  if (!audioBlob || audioBlob.size < MIN_AUDIO_BYTES) return '';
+
   const formData = new FormData();
-  formData.append('file', audioBlob, 'recording.webm');
+  formData.append('file', audioBlob, audioFileName(audioBlob));
   formData.append('model', 'whisper-1');
   // language は指定しない（Whisperが話者の言語を自動検出する）
   formData.append('response_format', 'verbose_json'); // 検出言語を取得するため
@@ -814,11 +859,13 @@ async function transcribeAudio(audioBlob, item) {
     throw new Error(`Whisper API エラー: ${response.status} - ${await response.text()}`);
   }
   const result = await response.json();
+  const text = result.text || '';
+  if (looksHallucinated(text)) return ''; // 無音時の“幻聴”は聞き取れなかった扱い（言語判定もしない）
   // 初回の発話で検出した言語を保存（追加質問もこの言語で表示する）
   if (!state.patientLang && result.language) {
     setDetectedLang(result.language);
   }
-  return result.text;
+  return text;
 }
 
 // 検出した言語を state に反映する
