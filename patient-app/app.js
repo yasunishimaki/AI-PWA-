@@ -570,9 +570,10 @@ async function handleFollowupAudio(audioBlob) {
     } else {
       state.attemptCount++;
       if (state.attemptCount < MAX_FOLLOWUP_ATTEMPTS) {
-        // もう1回だけ聞き直す
+        // もう1回だけ聞き直す。汎用文だと「何を聞かれているか」が分からず別の話題を答えて
+        // しまい、その答えが現在の項目に誤って保存される。項目の質問文を再表示して話題を保つ。
         state.recordingHandler = handleFollowupAudio;
-        await renderFollowupQuestion('もう少し具体的に教えていただけますか？', true);
+        await renderFollowupQuestion(state.currentItem.question, true);
         showScreen('followup');
         resetRecording();
       } else {
