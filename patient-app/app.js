@@ -531,15 +531,25 @@ async function askNextItem() {
 // 質問・ラベル・案内文を患者の言語に翻訳して表示する（日本語話者はそのまま）
 async function renderFollowupQuestion(questionJa, isReprompt) {
   const hintJa = isReprompt
-    ? 'もう少し具体的に教えてください。わからない場合はそのままお話しください。'
+    ? 'もう少し具体的に教えてください。わからない場合は「わかりません」とお話しください。'
     : 'マイクを押して、お答えください。';
-  const [label, question, hint] = await Promise.all([
+  const repromptJa = 'うまく聞き取れませんでした。もう一度おうかがいします';
+  const [label, question, hint, reprompt] = await Promise.all([
     localizeForPatient(state.currentItem.label),
     localizeForPatient(questionJa),
     localizeForPatient(hintJa),
+    isReprompt ? localizeForPatient(repromptJa) : Promise.resolve(''),
   ]);
   setText('followup-label', label);
   setText('followup-question', question);
+  // 聞き直しのときは、エラーや二重質問に見えないよう目立つ案内バーを出す（患者の言語で表示）
+  const banner = document.getElementById('followup-reprompt');
+  if (banner) {
+    banner.style.display = isReprompt ? 'block' : 'none';
+    if (isReprompt) banner.textContent = '🔄 ' + reprompt;
+  }
+  const card = document.getElementById('followup-card');
+  if (card) card.classList.toggle('reprompt', !!isReprompt);
   const hintEl = document.getElementById('followup-hint');
   if (hintEl) hintEl.textContent = hint;
 }

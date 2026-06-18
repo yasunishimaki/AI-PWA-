@@ -117,6 +117,12 @@
     }
     .question-text { font-size: 19px; font-weight: 600; color: var(--text); line-height: 1.6; }
     .followup-hint { font-size: 13px; color: var(--text-light); margin-top: 12px; text-align: center; }
+    .reprompt-banner {
+      display: none; background: #FFF4E5; color: #B26A00; font-weight: 700;
+      font-size: 15px; line-height: 1.5; padding: 10px 12px; border-radius: 10px;
+      margin-bottom: 14px; text-align: center;
+    }
+    .question-card.reprompt { box-shadow: 0 0 0 2px #F0A53E inset, 0 2px 12px rgba(0,0,0,0.06); }
 
     /* 進捗バー */
     .progress-wrap { margin-bottom: 16px; }
@@ -279,7 +285,8 @@
         <div class="progress-text" id="progress-text">0 / 0 項目</div>
       </div>
 
-      <div class="question-card">
+      <div class="question-card" id="followup-card">
+        <div class="reprompt-banner" id="followup-reprompt">🔄 うまく聞き取れませんでした。もう一度おうかがいします</div>
         <div class="question-tag" id="followup-label">追加の質問</div>
         <div class="question-ai">
           <div class="avatar">🤖</div>
