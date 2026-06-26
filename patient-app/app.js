@@ -744,6 +744,7 @@ function saveEditModal() {
     const item = state.currentMemo.items.find(i => i.key === state.editingItemKey);
     if (item) item.value = value || '不明';
     state.memoData[state.editingItemKey] = value || '不明';
+    saveMemo(true);   // 編集内容を履歴にも保存（過去のメモ閲覧で修正前に戻らないように）
     renderMemo();
     closeEditModal();
     showToast('変更を保存しました');
@@ -1130,12 +1131,16 @@ function saveMemo(silent) {
   if (!state.currentMemo) return;
   if (!state.currentMemo.id) state.currentMemo.id = makeMemoId(); // 旧データ救済
   const history = JSON.parse(localStorage.getItem('memo_history') || '[]');
-  // 同一メモの二重保存を避ける（メモ固有IDで判定）
-  if (!history.some(h => h.id === state.currentMemo.id)) {
+  // 既存メモ（同一ID）は最新内容で上書き更新し、無ければ先頭に追加する。
+  // （手入力の修正を履歴にも反映し、過去メモ閲覧で修正前に戻らないようにする）
+  const idx = history.findIndex(h => h.id === state.currentMemo.id);
+  if (idx >= 0) {
+    history[idx] = { ...state.currentMemo };
+  } else {
     history.unshift({ ...state.currentMemo });
     if (history.length > 50) history.length = 50;
-    localStorage.setItem('memo_history', JSON.stringify(history));
   }
+  localStorage.setItem('memo_history', JSON.stringify(history));
   if (!silent) showToast('メモを保存しました');
 }
 
