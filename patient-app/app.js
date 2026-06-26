@@ -820,7 +820,7 @@ function audioFileName(blob) {
 function looksHallucinated(text) {
   const t = String(text || '').trim();
   if (!t) return true;
-  return /ご(視聴|清聴)(いただき)?ありがとう|チャンネル登録|高評価|字幕|サブタイトル|thanks? for watching|please subscribe/i.test(t);
+  return /(視聴|清聴)|チャンネル登録|高評価|次の動画|また次回|お疲れ様でした|ご覧いただき|字幕|サブタイトル|エンディング|バイバイ|おやすみなさい|thanks?\s*for\s*watching|please\s*subscribe|amara/i.test(t);
 }
 
 async function transcribeAudio(audioBlob, item) {
